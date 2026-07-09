@@ -66,7 +66,7 @@ Both modes process messages individually and append the enriched results to `out
 ## ⚙️ How it Works
 
 1. **Ingestion**: Reads individual customer message files (`msg_NNN.json`) from `inbox/`. In default watch mode, a file-system watch (`watchdog` Observer) automatically triggers processing when a new message file is created.
-2. **Classification & Enrichment**: Sends the ticket to the Gemini API using `gemini-2.5-flash`. It extracts:
+2. **Classification & Enrichment**: Sends the ticket to the Gemini API using `gemini-3.1-flash-lite`. It extracts:
    - **Category**: One of `Bug Report`, `Feature Request`, `Billing Issue`, `Technical Question`, or `Incident/Outage`.
    - **Priority**: `Low`, `Medium`, or `High`.
    - **Entities**: Relevant identifiers like account IDs, error codes, invoice numbers, or dollar amounts.

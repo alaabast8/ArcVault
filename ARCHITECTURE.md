@@ -6,21 +6,23 @@ This document provides a comprehensive overview of the design, routing mechanism
 
 ## 1. System Design
 
-The current implementation of the triage pipeline is built as a single, synchronous Python script (`pipeline.py`). It simulates an end-to-end batch ingestion and triage flow. 
+The current implementation of the triage pipeline is built as a single Python script (`pipeline.py`) running in an event-driven watch mode. A `watchdog` observer monitors the `inbox/` folder and fires a handler for each new `msg_NNN.json` file, processing messages individually and incrementally as they arrive.
 
 ```mermaid
 graph TD
-    A[RAW_MESSAGES Ingestion] --> B[classify_and_enrich LLM Call]
-    B --> C[route Deterministic Logic]
-    C --> D[summarize LLM Call]
-    D --> E[In-Memory List Construction]
-    E --> F[output_records.json Write]
+    A["watchdog: new msg_NNN.json detected"] --> B["classify_and_enrich() — LLM Call"]
+    B --> C["route() — Deterministic Logic"]
+    C --> D["determine_escalation() — Rule-Based"]
+    D --> E["summarize() — LLM Call"]
+    E --> F["Read existing output_records.json"]
+    F --> G["Append new record to list"]
+    G --> H["Rewrite output_records.json"]
 ```
 
 *   **Ingestion**: The script reads individual customer messages from JSON files (`msg_NNN.json`) in the `inbox/` folder. In default watch mode, it uses the `watchdog` library to monitor the folder and automatically ingest new files as they are created.
-*   **Classification & Enrichment**: The message is sent to the Gemini API (`gemini-2.5-flash`) via the `classify_and_enrich()` function to extract category, priority, confidence, and entities.
+*   **Classification & Enrichment**: The message is sent to the Gemini API (`gemini-3.1-flash-lite`) via the `classify_and_enrich()` function to extract category, priority, confidence, and entities.
 *   **Routing**: The enriched data is passed to `route()` to determine the destination queue.
-*   **Escalation**: Simultaneously, the script determines if the message requires immediate escalation via `determine_escalation()`.
+*   **Escalation**: As part of routing, the script determines if the message requires immediate escalation via `determine_escalation()`.
 *   **Summary**: A second LLM call (`summarize()`) creates a customized summary based on the routing destination.
 *   **State Management**: The pipeline processes messages file-by-file and appends each new record incrementally to `output/output_records.json`. The `watchdog` observer enables the system to update state live without requiring an orchestrator or script restart.
 
@@ -61,7 +63,7 @@ The `determine_escalation()` function acts as a safety-critical override to flag
 To scale this synchronous prototype to a production environment handling thousands of requests, several key changes are required:
 
 *   **Message Queue & Orchestration**: The synchronous loop in `main()` must be replaced by an asynchronous event-driven consumer (using RabbitMQ, AWS SQS, or Kafka). Incoming messages from emails or web forms would be pushed to an ingestion queue, ensuring no tickets are lost in-memory if the service restarts.
-*   **API Rate Limits & Cost Management**: Gemini's free tier has request-per-minute (RPM) and request-per-day (RPD) limits. The `call_llm()` function already implements basic rate limit handling (a 4-second delay, exponential backoff, and fallback from `gemini-2.5-flash` to `gemini-3.1-flash-lite`). In production, we would use a paid tier and implement token-bucket rate-limiting, request batching for non-urgent tickets (to reduce costs), and caching for identical inquiries.
+*   **API Rate Limits & Cost Management**: Gemini's free tier has request-per-minute (RPM) and request-per-day (RPD) limits. The `call_llm()` function already implements basic rate limit handling for `gemini-3.1-flash-lite` (a 4-second delay before every call, plus exponential backoff with a retry-after hint on 429/5xx errors). In production, we would use a paid tier and implement token-bucket rate-limiting, request batching for non-urgent tickets (to reduce costs), and caching for identical inquiries.
 *   **Idempotency & Deduplication**: To prevent duplicate API charges and ticket creation, we need a deduplication layer (e.g., Redis). Every incoming message must be hashed, and duplicate hashes within a sliding window (e.g., 5 minutes) must be discarded.
 *   **Observability & Drift Monitoring**: We must log and monitor the distribution of the model's `confidence` scores and `category` predictions over time. A sudden drop in average confidence or a skew in predictions would flag prompt drift or changes in customer behavior, indicating a need to update prompts or fine-tune models.
 
