@@ -1,0 +1,15 @@
+# Environment variables
+.env
+
+# Python caching
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Output files
+output/
+
+# IDE files
+.vscode/
+.idea/
+.gemini/
